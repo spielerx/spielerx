@@ -30,7 +30,7 @@ Here are some icons representing my tech stack:
 ![Ant Design](https://img.icons8.com/color/48/000000/ant-design.png) 
 ![Bootstrap](https://img.icons8.com/color/48/000000/bootstrap.png) 
 ![Redux](https://img.icons8.com/color/48/000000/redux.png) 
-![Jest]([https://img.icons8.com/color/48/000000/jest.png](https://img.icons8.com/external-tal-revivo-color-tal-revivo/48/external-jest-can-collect-code-coverage-information-from-entire-projects-logo-color-tal-revivo.png)) 
+![Jest](https://img.icons8.com/external-tal-revivo-color-tal-revivo/48/external-jest-can-collect-code-coverage-information-from-entire-projects-logo-color-tal-revivo.png)
 ![React Testing Library](https://img.icons8.com/color/48/000000/react-native-testing-library.png) 
 ![ESLint](https://img.icons8.com/color/48/000000/eslint.png) 
 ![Git](https://img.icons8.com/color/48/000000/git.png) 
