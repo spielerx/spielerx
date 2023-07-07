@@ -15,9 +15,6 @@ Here are some of the technologies and tools I work with:
 - **Build Tools:** Vite, Webpack, Babel
 - **Editor/IDE:** Visual Studio Code
 
-## 🔧 Tech Stack Icons
-
-Here are some icons representing my tech stack:
 
 ![React](https://img.icons8.com/color/48/000000/react-native.png) 
 ![TypeScript](https://img.icons8.com/color/48/000000/typescript.png) 
