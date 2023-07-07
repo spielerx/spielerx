@@ -27,17 +27,12 @@ Here are some icons representing my tech stack:
 <img src="https://seeklogo.com/images/H/hardhat-logo-888739EBB4-seeklogo.com.png" width="50" alt="Hardhat">
 ![Solidity](https://img.icons8.com/color/48/000000/solidity.png) 
 ![Material-UI](https://img.icons8.com/color/48/000000/material-ui.png) 
-![Ant Design](https://img.icons8.com/color/48/000000/ant-design.png) 
-![Bootstrap](https://img.icons8.com/color/48/000000/bootstrap.png) 
 ![Redux](https://img.icons8.com/color/48/000000/redux.png) 
 ![Jest](https://img.icons8.com/external-tal-revivo-color-tal-revivo/48/external-jest-can-collect-code-coverage-information-from-entire-projects-logo-color-tal-revivo.png)
-![React Testing Library](https://img.icons8.com/color/48/000000/react-native-testing-library.png) 
 ![ESLint](https://img.icons8.com/color/48/000000/eslint.png) 
 ![Git](https://img.icons8.com/color/48/000000/git.png) 
 ![Webpack](https://img.icons8.com/color/48/000000/webpack.png) 
-![Yarn](https://img.icons8.com/color/48/000000/yarn.png) 
 ![Figma](https://img.icons8.com/color/48/000000/figma.png)
-![Visual Studio Code](https://img.icons8.com/color/48/000000/visual-studio-code.png)
 
 Feel free to reach out if you have any questions or if you'd like to collaborate on an exciting project!
 
