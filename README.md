@@ -24,7 +24,7 @@ Here are some icons representing my tech stack:
 ![HTML5](https://img.icons8.com/color/48/000000/html-5.png) 
 ![CSS3](https://img.icons8.com/color/48/000000/css3.png) 
 ![JavaScript](https://img.icons8.com/color/48/000000/javascript.png) 
-![Ethereum](https://img.icons8.com/color/48/000000/ethereum.png) 
+![Hardhat](https://hardhat.org/_next/static/media/hardhat-logo-dark.484eb916.svg)
 ![Solidity](https://img.icons8.com/color/48/000000/solidity.png) 
 ![Material-UI](https://img.icons8.com/color/48/000000/material-ui.png) 
 ![Ant Design](https://img.icons8.com/color/48/000000/ant-design.png) 
