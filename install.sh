@@ -76,8 +76,15 @@ setup_ssh_key_auth() {
     grep -q "^PasswordAuthentication" /etc/ssh/sshd_config || echo "PasswordAuthentication no" >> /etc/ssh/sshd_config
     grep -q "^PubkeyAuthentication" /etc/ssh/sshd_config || echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
     
-    # Restart SSH service
-    systemctl restart sshd
+    # Restart SSH service (try both sshd and ssh)
+    if systemctl restart sshd 2>/dev/null; then
+        echo -e "${GREEN}✓ SSH service restarted (sshd)${NC}"
+    elif systemctl restart ssh 2>/dev/null; then
+        echo -e "${GREEN}✓ SSH service restarted (ssh)${NC}"
+    else
+        echo -e "${RED}✗ Failed to restart SSH service${NC}"
+        return
+    fi
     
     echo -e "${GREEN}✓ SSH key authentication configured successfully!${NC}"
     echo -e "${YELLOW}⚠ IMPORTANT: Test SSH key login in another terminal before closing this session!${NC}"
