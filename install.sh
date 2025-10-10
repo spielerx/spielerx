@@ -27,12 +27,17 @@ show_menu() {
     echo -n "Select an option [1-6]: "
 }
 
+# Function to read from terminal
+read_from_terminal() {
+    read "$@" < /dev/tty
+}
+
 setup_ssh_key_auth() {
     echo -e "\n${YELLOW}=== SSH Key Authentication Setup ===${NC}"
     echo "This will disable password authentication and enable SSH key only."
     echo ""
     
-    read -p "Enter your SSH public key: " ssh_key
+    read_from_terminal -p "Enter your SSH public key: " ssh_key
     
     if [[ -z "$ssh_key" ]]; then
         echo -e "${RED}No SSH key provided. Aborting.${NC}"
@@ -44,7 +49,7 @@ setup_ssh_key_auth() {
     echo "- Disable password authentication"
     echo "- Disable root password login"
     echo ""
-    read -p "Confirm? (yes/no): " confirm
+    read_from_terminal -p "Confirm? (yes/no): " confirm
     
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -86,7 +91,7 @@ configure_swap() {
     echo "Current swap: $current_swap"
     echo ""
     
-    read -p "Enter swap size in GB (0 to remove swap): " swap_size
+    read_from_terminal -p "Enter swap size in GB (0 to remove swap): " swap_size
     
     if ! [[ "$swap_size" =~ ^[0-9]+$ ]]; then
         echo -e "${RED}Invalid input. Please enter a number.${NC}"
@@ -100,7 +105,7 @@ configure_swap() {
         echo "- Create/Update swap file: ${swap_size}GB"
     fi
     echo ""
-    read -p "Confirm? (yes/no): " confirm
+    read_from_terminal -p "Confirm? (yes/no): " confirm
     
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -133,7 +138,7 @@ setup_vpn() {
     echo -e "\n${YELLOW}=== VPN Setup ===${NC}"
     echo "This will download and run the VPN setup script."
     echo ""
-    read -p "Confirm? (yes/no): " confirm
+    read_from_terminal -p "Confirm? (yes/no): " confirm
     
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -153,7 +158,7 @@ install_docker() {
     echo -e "\n${YELLOW}=== Docker & Docker Compose Installation ===${NC}"
     echo "This will install Docker and Docker Compose."
     echo ""
-    read -p "Confirm? (yes/no): " confirm
+    read_from_terminal -p "Confirm? (yes/no): " confirm
     
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -206,7 +211,7 @@ install_dokploy() {
     echo ""
     echo "Note: Domain configuration is done through the web UI after installation."
     echo ""
-    read -p "Confirm installation? (yes/no): " confirm
+    read_from_terminal -p "Confirm installation? (yes/no): " confirm
     
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -252,28 +257,28 @@ install_dokploy() {
 # Main loop
 while true; do
     show_menu
-    read choice
+    read_from_terminal choice
     
     case $choice in
         1)
             setup_ssh_key_auth
-            read -p "Press Enter to continue..."
+            read_from_terminal -p "Press Enter to continue..."
             ;;
         2)
             configure_swap
-            read -p "Press Enter to continue..."
+            read_from_terminal -p "Press Enter to continue..."
             ;;
         3)
             setup_vpn
-            read -p "Press Enter to continue..."
+            read_from_terminal -p "Press Enter to continue..."
             ;;
         4)
             install_docker
-            read -p "Press Enter to continue..."
+            read_from_terminal -p "Press Enter to continue..."
             ;;
         5)
             install_dokploy
-            read -p "Press Enter to continue..."
+            read_from_terminal -p "Press Enter to continue..."
             ;;
         6)
             echo -e "\n${GREEN}Goodbye!${NC}"
@@ -281,7 +286,7 @@ while true; do
             ;;
         *)
             echo -e "${RED}Invalid option. Please try again.${NC}"
-            read -p "Press Enter to continue..."
+            read_from_terminal -p "Press Enter to continue..."
             ;;
     esac
 done
