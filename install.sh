@@ -4,6 +4,7 @@
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Check if running as root
@@ -15,21 +16,27 @@ fi
 show_menu() {
     clear
     echo "=========================================="
-    echo "    Ubuntu Server Setup Tool"
+    echo "       Ubuntu Server Setup Tool"
     echo "=========================================="
     echo "1) Setup SSH Key Authentication Only"
     echo "2) Configure Swap File"
     echo "3) Setup VPN Connection"
     echo "4) Install Docker & Docker Compose"
     echo "5) Install Dokploy"
-    echo "6) Exit"
+    echo -e "6) ${YELLOW}Security Hardening${NC} (NEW)"
+    echo "7) Exit"
     echo "=========================================="
-    echo -n "Select an option [1-6]: "
+    echo -n "Select an option [1-7]: "
 }
 
 # Function to read from terminal
 read_from_terminal() {
     read "$@" < /dev/tty
+}
+
+# Generate random port between 10000-65000
+generate_random_port() {
+    echo $(shuf -i 10000-65000 -n 1)
 }
 
 setup_ssh_key_auth() {
@@ -261,6 +268,331 @@ install_dokploy() {
     fi
 }
 
+security_hardening() {
+    echo -e "\n${YELLOW}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║       SECURITY HARDENING                 ║${NC}"
+    echo -e "${YELLOW}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+    echo "This will perform the following actions:"
+    echo ""
+    echo -e "${BLUE}1. Run Lynis security audit${NC} (optional, for report)"
+    echo -e "${BLUE}2. Change SSH port${NC} from 22 to random (10000-65000)"
+    echo -e "${BLUE}3. Configure UFW firewall${NC}"
+    echo "   - Allow new SSH port"
+    echo "   - Allow HTTP (80)"
+    echo "   - Allow HTTPS (443)"
+    echo "   - Allow Dokploy (3000)"
+    echo "   - Deny everything else"
+    echo -e "${BLUE}4. Enable automatic security updates${NC}"
+    echo -e "${BLUE}5. Apply kernel security settings${NC} (sysctl)"
+    echo -e "${BLUE}6. Install fail2ban${NC} (optional)"
+    echo ""
+    
+    # Check current SSH port
+    current_ssh_port=$(grep "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+    if [[ -z "$current_ssh_port" ]]; then
+        current_ssh_port=22
+    fi
+    echo -e "Current SSH port: ${YELLOW}${current_ssh_port}${NC}"
+    echo ""
+    
+    read_from_terminal -p "Continue with security hardening? (yes/no): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo -e "${RED}Operation cancelled.${NC}"
+        return
+    fi
+    
+    # Ask about Lynis
+    echo ""
+    read_from_terminal -p "Run Lynis audit first? (yes/no): " run_lynis
+    
+    # Ask about fail2ban
+    read_from_terminal -p "Install fail2ban? (recommended: no if using SSH keys) (yes/no): " install_fail2ban
+    
+    # Ask about custom ports
+    echo ""
+    echo -e "${YELLOW}Port configuration:${NC}"
+    new_ssh_port=$(generate_random_port)
+    echo "Generated random SSH port: $new_ssh_port"
+    read_from_terminal -p "Use this port or enter custom (press Enter for $new_ssh_port): " custom_port
+    if [[ -n "$custom_port" ]] && [[ "$custom_port" =~ ^[0-9]+$ ]]; then
+        new_ssh_port=$custom_port
+    fi
+    
+    # Additional ports
+    read_from_terminal -p "Additional ports to open (comma-separated, e.g., 8080,9000) or Enter to skip: " extra_ports
+    
+    echo ""
+    echo -e "${YELLOW}══════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}Summary of changes:${NC}"
+    echo -e "  SSH port: ${current_ssh_port} → ${GREEN}${new_ssh_port}${NC}"
+    echo -e "  UFW ports: ${GREEN}${new_ssh_port}/tcp, 80/tcp, 443/tcp, 3000/tcp${NC}"
+    if [[ -n "$extra_ports" ]]; then
+        echo -e "  Extra ports: ${GREEN}${extra_ports}${NC}"
+    fi
+    echo -e "  Lynis audit: ${run_lynis}"
+    echo -e "  Fail2ban: ${install_fail2ban}"
+    echo -e "  Auto security updates: ${GREEN}yes${NC}"
+    echo -e "  Kernel hardening: ${GREEN}yes${NC}"
+    echo -e "${YELLOW}══════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${RED}⚠ WARNING: Make sure you can access the server on the new SSH port!${NC}"
+    echo -e "${RED}⚠ Keep this session open until you verify new port works!${NC}"
+    echo ""
+    read_from_terminal -p "Apply all changes? (yes/no): " final_confirm
+    
+    if [[ "$final_confirm" != "yes" ]]; then
+        echo -e "${RED}Operation cancelled.${NC}"
+        return
+    fi
+    
+    echo ""
+    echo -e "${BLUE}Starting security hardening...${NC}"
+    echo ""
+    
+    # ==========================================
+    # 1. LYNIS AUDIT (optional)
+    # ==========================================
+    if [[ "$run_lynis" == "yes" ]]; then
+        echo -e "${YELLOW}[1/6] Running Lynis audit...${NC}"
+        if ! command -v lynis &> /dev/null; then
+            apt-get update -qq
+            apt-get install -y -qq lynis
+        fi
+        lynis audit system --quick 2>/dev/null | tail -50
+        echo -e "${GREEN}✓ Lynis audit complete${NC}"
+        echo "  Full report: /var/log/lynis-report.dat"
+        echo ""
+    else
+        echo -e "${YELLOW}[1/6] Lynis audit skipped${NC}"
+    fi
+    
+    # ==========================================
+    # 2. CHANGE SSH PORT
+    # ==========================================
+    echo -e "${YELLOW}[2/6] Changing SSH port to ${new_ssh_port}...${NC}"
+    
+    # Backup SSH config
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%Y%m%d_%H%M%S)
+    
+    # Remove existing Port lines and add new one
+    sed -i '/^#*Port /d' /etc/ssh/sshd_config
+    echo "Port ${new_ssh_port}" >> /etc/ssh/sshd_config
+    
+    # Additional SSH hardening
+    sed -i 's/#*MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
+    sed -i 's/#*LoginGraceTime.*/LoginGraceTime 30/' /etc/ssh/sshd_config
+    sed -i 's/#*X11Forwarding yes/X11Forwarding no/' /etc/ssh/sshd_config
+    
+    # Add if not exists
+    grep -q "^MaxAuthTries" /etc/ssh/sshd_config || echo "MaxAuthTries 3" >> /etc/ssh/sshd_config
+    grep -q "^LoginGraceTime" /etc/ssh/sshd_config || echo "LoginGraceTime 30" >> /etc/ssh/sshd_config
+    
+    echo -e "${GREEN}✓ SSH port changed to ${new_ssh_port}${NC}"
+    
+    # ==========================================
+    # 3. CONFIGURE UFW FIREWALL
+    # ==========================================
+    echo -e "${YELLOW}[3/6] Configuring UFW firewall...${NC}"
+    
+    # Install UFW if needed
+    if ! command -v ufw &> /dev/null; then
+        apt-get install -y -qq ufw
+    fi
+    
+    # Reset UFW to defaults
+    ufw --force reset >/dev/null
+    
+    # Set default policies
+    ufw default deny incoming >/dev/null
+    ufw default allow outgoing >/dev/null
+    
+    # Allow required ports
+    ufw allow ${new_ssh_port}/tcp comment 'SSH' >/dev/null
+    ufw allow 80/tcp comment 'HTTP' >/dev/null
+    ufw allow 443/tcp comment 'HTTPS' >/dev/null
+    ufw allow 3000/tcp comment 'Dokploy' >/dev/null
+    
+    # Allow extra ports if specified
+    if [[ -n "$extra_ports" ]]; then
+        IFS=',' read -ra PORTS <<< "$extra_ports"
+        for port in "${PORTS[@]}"; do
+            port=$(echo "$port" | tr -d ' ')
+            if [[ "$port" =~ ^[0-9]+$ ]]; then
+                ufw allow ${port}/tcp comment 'Custom' >/dev/null
+                echo "  Added port ${port}/tcp"
+            fi
+        done
+    fi
+    
+    # Enable UFW
+    ufw --force enable >/dev/null
+    
+    echo -e "${GREEN}✓ UFW firewall configured and enabled${NC}"
+    ufw status numbered
+    echo ""
+    
+    # ==========================================
+    # 4. AUTOMATIC SECURITY UPDATES
+    # ==========================================
+    echo -e "${YELLOW}[4/6] Enabling automatic security updates...${NC}"
+    
+    apt-get install -y -qq unattended-upgrades apt-listchanges
+    
+    # Configure unattended-upgrades
+    cat > /etc/apt/apt.conf.d/20auto-upgrades << 'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+    
+    # Enable security updates only
+    cat > /etc/apt/apt.conf.d/50unattended-upgrades << 'EOF'
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+};
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";
+EOF
+    
+    systemctl enable unattended-upgrades >/dev/null 2>&1
+    systemctl start unattended-upgrades >/dev/null 2>&1
+    
+    echo -e "${GREEN}✓ Automatic security updates enabled${NC}"
+    
+    # ==========================================
+    # 5. KERNEL SECURITY (SYSCTL)
+    # ==========================================
+    echo -e "${YELLOW}[5/6] Applying kernel security settings...${NC}"
+    
+    cat > /etc/sysctl.d/99-security.conf << 'EOF'
+# IP Spoofing protection
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+
+# Ignore ICMP broadcast requests
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+
+# Disable source packet routing
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.default.accept_source_route = 0
+
+# Ignore send redirects
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+# Block SYN attacks
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_syn_backlog = 2048
+net.ipv4.tcp_synack_retries = 2
+net.ipv4.tcp_syn_retries = 5
+
+# Log Martians
+net.ipv4.conf.all.log_martians = 1
+
+# Ignore ICMP redirects
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+
+# Disable IPv6 if not needed (uncomment if you don't use IPv6)
+# net.ipv6.conf.all.disable_ipv6 = 1
+# net.ipv6.conf.default.disable_ipv6 = 1
+EOF
+    
+    sysctl -p /etc/sysctl.d/99-security.conf >/dev/null 2>&1
+    
+    echo -e "${GREEN}✓ Kernel security settings applied${NC}"
+    
+    # ==========================================
+    # 6. FAIL2BAN (optional)
+    # ==========================================
+    if [[ "$install_fail2ban" == "yes" ]]; then
+        echo -e "${YELLOW}[6/6] Installing fail2ban...${NC}"
+        
+        apt-get install -y -qq fail2ban
+        
+        # Configure fail2ban for SSH
+        cat > /etc/fail2ban/jail.local << EOF
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 5
+ignoreip = 127.0.0.1/8 ::1
+
+[sshd]
+enabled = true
+port = ${new_ssh_port}
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 24h
+EOF
+        
+        systemctl enable fail2ban >/dev/null 2>&1
+        systemctl restart fail2ban >/dev/null 2>&1
+        
+        echo -e "${GREEN}✓ Fail2ban installed and configured${NC}"
+    else
+        echo -e "${YELLOW}[6/6] Fail2ban skipped${NC}"
+    fi
+    
+    # ==========================================
+    # RESTART SSH
+    # ==========================================
+    echo ""
+    echo -e "${YELLOW}Restarting SSH service...${NC}"
+    
+    if systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null; then
+        echo -e "${GREEN}✓ SSH service restarted${NC}"
+    else
+        echo -e "${RED}✗ Failed to restart SSH - CHECK MANUALLY!${NC}"
+    fi
+    
+    # ==========================================
+    # FINAL SUMMARY
+    # ==========================================
+    echo ""
+    echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║     SECURITY HARDENING COMPLETE!         ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}IMPORTANT - New connection command:${NC}"
+    echo ""
+    echo -e "  ${GREEN}ssh -p ${new_ssh_port} root@$(hostname -I | awk '{print $1}')${NC}"
+    echo ""
+    echo -e "${RED}⚠ TEST THIS IN A NEW TERMINAL BEFORE CLOSING THIS SESSION!${NC}"
+    echo ""
+    echo "Open ports:"
+    ufw status | grep -E "^\[|ALLOW"
+    echo ""
+    echo -e "Lynis report: ${BLUE}/var/log/lynis-report.dat${NC}"
+    echo -e "SSH config backup: ${BLUE}/etc/ssh/sshd_config.backup.*${NC}"
+    echo ""
+    
+    # Save connection info to file
+    cat > /root/ssh-connection-info.txt << EOF
+SSH Connection Info (generated $(date))
+========================================
+Port: ${new_ssh_port}
+IP: $(hostname -I | awk '{print $1}')
+
+Connection command:
+ssh -p ${new_ssh_port} root@$(hostname -I | awk '{print $1}')
+
+Open firewall ports:
+$(ufw status | grep ALLOW)
+EOF
+    
+    echo -e "Connection info saved to: ${BLUE}/root/ssh-connection-info.txt${NC}"
+}
+
 # Main loop
 while true; do
     show_menu
@@ -288,6 +620,10 @@ while true; do
             read_from_terminal -p "Press Enter to continue..."
             ;;
         6)
+            security_hardening
+            read_from_terminal -p "Press Enter to continue..."
+            ;;
+        7)
             echo -e "\n${GREEN}Goodbye!${NC}"
             exit 0
             ;;
