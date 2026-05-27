@@ -24,9 +24,10 @@ show_menu() {
     echo "4) Install Docker & Docker Compose"
     echo "5) Install Dokploy"
     echo -e "6) ${YELLOW}Security Hardening${NC} (NEW)"
-    echo "7) Exit"
+    echo "7) Install & Configure Squid Proxy"
+    echo "8) Exit"
     echo "=========================================="
-    echo -n "Select an option [1-7]: "
+    echo -n "Select an option [1-8]: "
 }
 
 # Function to read from terminal
@@ -37,6 +38,180 @@ read_from_terminal() {
 # Generate random port between 10000-65000
 generate_random_port() {
     echo $(shuf -i 10000-65000 -n 1)
+}
+
+SQUID_PROXY_PORT=3128
+SQUID_PASSWD_FILE="/etc/squid/passwd"
+SQUID_MARKER="/etc/squid/.spielerx-proxy-configured"
+
+get_script_dir() {
+    cd "$(dirname "${BASH_SOURCE[0]}")" && pwd
+}
+
+get_server_ip() {
+    hostname -I 2>/dev/null | awk '{print $1}'
+}
+
+# Generate secure password (12-16 alphanumeric + symbols)
+generate_secure_password() {
+    local length=$((12 + RANDOM % 5))
+    local password=""
+    while [[ ${#password} -lt $length ]]; do
+        password+=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9!@#$%&*+-=' | head -c $((length - ${#password})))
+    done
+    echo "${password:0:$length}"
+}
+
+find_basic_ncsa_auth() {
+    local p
+    for p in /usr/lib/squid/basic_ncsa_auth /usr/lib64/squid/basic_ncsa_auth /usr/lib/squid3/basic_ncsa_auth; do
+        if [[ -x "$p" ]]; then
+            echo "$p"
+            return 0
+        fi
+    done
+    return 1
+}
+
+setup_squid_proxy() {
+    echo -e "\n${YELLOW}=== Squid Proxy Setup ===${NC}"
+    echo "HTTP proxy with basic authentication (port ${SQUID_PROXY_PORT})."
+    echo ""
+
+    local script_dir squid_clients_dir client_file login password server_ip basic_auth_prog
+
+    script_dir=$(get_script_dir)
+    squid_clients_dir="${script_dir}/squid-clients"
+    mkdir -p "$squid_clients_dir"
+
+    read_from_terminal -p "Enter proxy login: " login
+
+    if [[ -z "$login" ]]; then
+        echo -e "${RED}Login cannot be empty.${NC}"
+        return
+    fi
+
+    if [[ ! "$login" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{2,31}$ ]]; then
+        echo -e "${RED}Invalid login. Use 3-32 characters: letters, digits, underscore, hyphen.${NC}"
+        return
+    fi
+
+    client_file="${squid_clients_dir}/${login}.txt"
+
+    if [[ -f "$client_file" ]]; then
+        echo -e "${RED}Error: client file already exists:${NC} ${client_file}"
+        echo -e "${YELLOW}Choose a different login to generate a new proxy configuration.${NC}"
+        return
+    fi
+
+    password=$(generate_secure_password)
+    server_ip=$(get_server_ip)
+
+    if [[ -z "$server_ip" ]]; then
+        echo -e "${RED}Could not detect server IP address.${NC}"
+        return
+    fi
+
+    echo ""
+    echo "Installing Squid and dependencies..."
+    apt-get update -qq
+    apt-get install -y -qq squid apache2-utils openssl
+
+    basic_auth_prog=$(find_basic_ncsa_auth)
+    if [[ -z "$basic_auth_prog" ]]; then
+        echo -e "${RED}basic_ncsa_auth not found. Squid auth helper is missing.${NC}"
+        return
+    fi
+
+    if [[ ! -f "$SQUID_MARKER" ]]; then
+        echo "Configuring Squid..."
+
+        cp /etc/squid/squid.conf "/etc/squid/squid.conf.backup.$(date +%Y%m%d_%H%M%S)"
+
+        touch "$SQUID_PASSWD_FILE"
+        chmod 640 "$SQUID_PASSWD_FILE"
+        chown root:proxy "$SQUID_PASSWD_FILE" 2>/dev/null || chown root:root "$SQUID_PASSWD_FILE"
+
+        mkdir -p /etc/squid/conf.d
+
+        # Disable default http_access rules so only authenticated clients are allowed
+        sed -i 's/^http_access/#http_access/' /etc/squid/squid.conf
+
+        cat > /etc/squid/conf.d/spielerx-proxy.conf << EOF
+# SpielerX HTTP proxy (basic auth)
+auth_param basic program ${basic_auth_prog} ${SQUID_PASSWD_FILE}
+auth_param basic children 5 startup=5 idle=1
+auth_param basic realm Squid Proxy
+acl authenticated proxy_auth REQUIRED
+http_access allow authenticated
+http_access deny all
+EOF
+
+        if grep -q '^http_port ' /etc/squid/squid.conf 2>/dev/null; then
+            sed -i "s/^http_port .*/http_port ${SQUID_PROXY_PORT}/" /etc/squid/squid.conf
+        else
+            echo "http_port ${SQUID_PROXY_PORT}" >> /etc/squid/squid.conf
+        fi
+
+        if ! grep -q '^include /etc/squid/conf.d/\*.conf' /etc/squid/squid.conf 2>/dev/null; then
+            echo 'include /etc/squid/conf.d/*.conf' >> /etc/squid/squid.conf
+        fi
+
+        touch "$SQUID_MARKER"
+    fi
+
+    if ! htpasswd -b "$SQUID_PASSWD_FILE" "$login" "$password" 2>/dev/null; then
+        echo -e "${RED}Failed to add proxy user (login may already exist in Squid).${NC}"
+        echo -e "${YELLOW}Try a different login.${NC}"
+        return
+    fi
+
+    chmod 640 "$SQUID_PASSWD_FILE"
+    chown root:proxy "$SQUID_PASSWD_FILE" 2>/dev/null || chown root:root "$SQUID_PASSWD_FILE"
+
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw allow ${SQUID_PROXY_PORT}/tcp comment 'Squid HTTP proxy' >/dev/null 2>&1
+    fi
+
+    if ! squid -k parse 2>/dev/null; then
+        echo -e "${RED}Squid configuration test failed. Check: squid -k parse${NC}"
+        return
+    fi
+
+    systemctl enable squid >/dev/null 2>&1
+    systemctl restart squid
+
+    if ! systemctl is-active --quiet squid; then
+        echo -e "${RED}Squid failed to start. Check: journalctl -u squid -n 50${NC}"
+        return
+    fi
+
+    cat > "$client_file" << EOF
+Squid Proxy Client (created $(date))
+========================================
+IP:       ${server_ip}
+Port:     ${SQUID_PROXY_PORT}
+Login:    ${login}
+Password: ${password}
+
+Proxy URL:
+http://${login}:${password}@${server_ip}:${SQUID_PROXY_PORT}
+EOF
+    chmod 600 "$client_file"
+
+    echo ""
+    echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║        SQUID PROXY READY                 ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  ${BLUE}IP:${NC}       ${GREEN}${server_ip}${NC}"
+    echo -e "  ${BLUE}Port:${NC}     ${GREEN}${SQUID_PROXY_PORT}${NC}"
+    echo -e "  ${BLUE}Login:${NC}    ${GREEN}${login}${NC}"
+    echo -e "  ${BLUE}Password:${NC} ${GREEN}${password}${NC}"
+    echo ""
+    echo -e "  ${YELLOW}http://${login}:${password}@${server_ip}:${SQUID_PROXY_PORT}${NC}"
+    echo ""
+    echo -e "Credentials saved to: ${BLUE}${client_file}${NC}"
 }
 
 setup_ssh_key_auth() {
@@ -624,6 +799,10 @@ while true; do
             read_from_terminal -p "Press Enter to continue..."
             ;;
         7)
+            setup_squid_proxy
+            read_from_terminal -p "Press Enter to continue..."
+            ;;
+        8)
             echo -e "\n${GREEN}Goodbye!${NC}"
             exit 0
             ;;
