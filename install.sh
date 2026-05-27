@@ -23,16 +23,106 @@ show_menu() {
     echo "3) Setup VPN Connection"
     echo "4) Install Docker & Docker Compose"
     echo "5) Install Dokploy"
-    echo -e "6) ${YELLOW}Security Hardening${NC} (NEW)"
+    echo "6) Security Hardening"
     echo "7) Install & Configure Squid Proxy"
     echo "8) Exit"
     echo "=========================================="
+    echo "Esc — exit | Esc in submenu — back to menu"
     echo -n "Select an option [1-8]: "
 }
 
-# Function to read from terminal
+MENU_ESC=0
+
+consume_escape_suffix() {
+    local rest=""
+    read -rsn1 -t 0.01 rest < /dev/tty 2>/dev/null || return 0
+    if [[ "$rest" == '[' ]]; then
+        read -rsn1 -t 0.01 rest < /dev/tty 2>/dev/null || true
+    fi
+}
+
+# Read a line from /dev/tty; Esc returns 1
+_read_line_with_esc() {
+    local prompt="$1"
+    local varname="$2"
+    local input="" c
+
+    if [[ -n "$prompt" ]]; then
+        echo -ne "$prompt" > /dev/tty
+    fi
+
+    while true; do
+        if ! IFS= read -rsn1 c < /dev/tty; then
+            return 1
+        fi
+        if [[ "$c" == $'\e' ]]; then
+            consume_escape_suffix
+            echo "" > /dev/tty
+            printf -v "$varname" ''
+            return 1
+        elif [[ -z "$c" ]]; then
+            break
+        elif [[ "$c" == $'\177' ]] || [[ "$c" == $'\b' ]]; then
+            if [[ -n "$input" ]]; then
+                input="${input%?}"
+                printf '\b \b' > /dev/tty
+            fi
+        else
+            input+="$c"
+            printf '%s' "$c" > /dev/tty
+        fi
+    done
+
+    echo "" > /dev/tty
+    printf -v "$varname" '%s' "$input"
+    return 0
+}
+
+# Function to read from terminal (Esc in submenu → back to menu)
 read_from_terminal() {
-    read "$@" < /dev/tty
+    local prompt="" varname="REPLY"
+    local args=("$@")
+    local i=0
+
+    while [[ $i -lt ${#args[@]} ]]; do
+        case "${args[$i]}" in
+            -p)
+                prompt="${args[$((i + 1))]}"
+                i=$((i + 2))
+                ;;
+            *)
+                varname="${args[$i]}"
+                i=$((i + 1))
+                ;;
+        esac
+    done
+
+    if ! _read_line_with_esc "$prompt" "$varname"; then
+        MENU_ESC=1
+        echo -e "\n${YELLOW}Esc — back to menu${NC}"
+        return 1
+    fi
+    return 0
+}
+
+# Menu choice read (Esc → exit script)
+read_menu_choice() {
+    local choice=""
+    if ! _read_line_with_esc "" choice; then
+        return 1
+    fi
+    REPLY="$choice"
+    return 0
+}
+
+pause_before_menu() {
+    if [[ "$MENU_ESC" == "1" ]]; then
+        return
+    fi
+    echo ""
+    if ! _read_line_with_esc "Press Enter to continue (Esc — menu): " _; then
+        MENU_ESC=1
+    fi
 }
 
 # Generate random port between 10000-65000
@@ -84,7 +174,7 @@ setup_squid_proxy() {
     squid_clients_dir="${script_dir}/squid-clients"
     mkdir -p "$squid_clients_dir"
 
-    read_from_terminal -p "Enter proxy login: " login
+    read_from_terminal -p "Enter proxy login: " login || return
 
     if [[ -z "$login" ]]; then
         echo -e "${RED}Login cannot be empty.${NC}"
@@ -219,7 +309,7 @@ setup_ssh_key_auth() {
     echo "This will disable password authentication and enable SSH key only."
     echo ""
     
-    read_from_terminal -p "Enter your SSH public key: " ssh_key
+    read_from_terminal -p "Enter your SSH public key: " ssh_key || return
     
     if [[ -z "$ssh_key" ]]; then
         echo -e "${RED}No SSH key provided. Aborting.${NC}"
@@ -231,7 +321,7 @@ setup_ssh_key_auth() {
     echo "- Disable password authentication"
     echo "- Disable root password login"
     echo ""
-    read_from_terminal -p "Confirm? (yes/no): " confirm
+    read_from_terminal -p "Confirm? (yes/no): " confirm || return
     
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -280,7 +370,7 @@ configure_swap() {
     echo "Current swap: $current_swap"
     echo ""
     
-    read_from_terminal -p "Enter swap size in GB (0 to remove swap): " swap_size
+    read_from_terminal -p "Enter swap size in GB (0 to remove swap): " swap_size || return
     
     if ! [[ "$swap_size" =~ ^[0-9]+$ ]]; then
         echo -e "${RED}Invalid input. Please enter a number.${NC}"
@@ -294,7 +384,7 @@ configure_swap() {
         echo "- Create/Update swap file: ${swap_size}GB"
     fi
     echo ""
-    read_from_terminal -p "Confirm? (yes/no): " confirm
+    read_from_terminal -p "Confirm? (yes/no): " confirm || return
     
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -327,7 +417,7 @@ setup_vpn() {
     echo -e "\n${YELLOW}=== VPN Setup ===${NC}"
     echo "This will download and run the VPN setup script."
     echo ""
-    read_from_terminal -p "Confirm? (yes/no): " confirm
+    read_from_terminal -p "Confirm? (yes/no): " confirm || return
     
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -347,7 +437,7 @@ install_docker() {
     echo -e "\n${YELLOW}=== Docker & Docker Compose Installation ===${NC}"
     echo "This will install Docker and Docker Compose."
     echo ""
-    read_from_terminal -p "Confirm? (yes/no): " confirm
+    read_from_terminal -p "Confirm? (yes/no): " confirm || return
     
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -400,7 +490,7 @@ install_dokploy() {
     echo ""
     echo "Note: Domain configuration is done through the web UI after installation."
     echo ""
-    read_from_terminal -p "Confirm installation? (yes/no): " confirm
+    read_from_terminal -p "Confirm installation? (yes/no): " confirm || return
     
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -471,7 +561,7 @@ security_hardening() {
     echo -e "Current SSH port: ${YELLOW}${current_ssh_port}${NC}"
     echo ""
     
-    read_from_terminal -p "Continue with security hardening? (yes/no): " confirm
+    read_from_terminal -p "Continue with security hardening? (yes/no): " confirm || return
     if [[ "$confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
         return
@@ -479,23 +569,23 @@ security_hardening() {
     
     # Ask about Lynis
     echo ""
-    read_from_terminal -p "Run Lynis audit first? (yes/no): " run_lynis
+    read_from_terminal -p "Run Lynis audit first? (yes/no): " run_lynis || return
     
     # Ask about fail2ban
-    read_from_terminal -p "Install fail2ban? (recommended: no if using SSH keys) (yes/no): " install_fail2ban
+    read_from_terminal -p "Install fail2ban? (recommended: no if using SSH keys) (yes/no): " install_fail2ban || return
     
     # Ask about custom ports
     echo ""
     echo -e "${YELLOW}Port configuration:${NC}"
     new_ssh_port=$(generate_random_port)
     echo "Generated random SSH port: $new_ssh_port"
-    read_from_terminal -p "Use this port or enter custom (press Enter for $new_ssh_port): " custom_port
+    read_from_terminal -p "Use this port or enter custom (press Enter for $new_ssh_port): " custom_port || return
     if [[ -n "$custom_port" ]] && [[ "$custom_port" =~ ^[0-9]+$ ]]; then
         new_ssh_port=$custom_port
     fi
     
     # Additional ports
-    read_from_terminal -p "Additional ports to open (comma-separated, e.g., 8080,9000) or Enter to skip: " extra_ports
+    read_from_terminal -p "Additional ports to open (comma-separated, e.g., 8080,9000) or Enter to skip: " extra_ports || return
     
     echo ""
     echo -e "${YELLOW}══════════════════════════════════════════${NC}"
@@ -514,7 +604,7 @@ security_hardening() {
     echo -e "${RED}⚠ WARNING: Make sure you can access the server on the new SSH port!${NC}"
     echo -e "${RED}⚠ Keep this session open until you verify new port works!${NC}"
     echo ""
-    read_from_terminal -p "Apply all changes? (yes/no): " final_confirm
+    read_from_terminal -p "Apply all changes? (yes/no): " final_confirm || return
     
     if [[ "$final_confirm" != "yes" ]]; then
         echo -e "${RED}Operation cancelled.${NC}"
@@ -771,36 +861,42 @@ EOF
 # Main loop
 while true; do
     show_menu
-    read_from_terminal choice
-    
+    MENU_ESC=0
+
+    if ! read_menu_choice; then
+        echo -e "\n${GREEN}Goodbye!${NC}"
+        exit 0
+    fi
+    choice="$REPLY"
+
     case $choice in
         1)
             setup_ssh_key_auth
-            read_from_terminal -p "Press Enter to continue..."
+            pause_before_menu
             ;;
         2)
             configure_swap
-            read_from_terminal -p "Press Enter to continue..."
+            pause_before_menu
             ;;
         3)
             setup_vpn
-            read_from_terminal -p "Press Enter to continue..."
+            pause_before_menu
             ;;
         4)
             install_docker
-            read_from_terminal -p "Press Enter to continue..."
+            pause_before_menu
             ;;
         5)
             install_dokploy
-            read_from_terminal -p "Press Enter to continue..."
+            pause_before_menu
             ;;
         6)
             security_hardening
-            read_from_terminal -p "Press Enter to continue..."
+            pause_before_menu
             ;;
         7)
             setup_squid_proxy
-            read_from_terminal -p "Press Enter to continue..."
+            pause_before_menu
             ;;
         8)
             echo -e "\n${GREEN}Goodbye!${NC}"
@@ -808,7 +904,7 @@ while true; do
             ;;
         *)
             echo -e "${RED}Invalid option. Please try again.${NC}"
-            read_from_terminal -p "Press Enter to continue..."
+            pause_before_menu
             ;;
     esac
 done
