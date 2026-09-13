@@ -31,10 +31,16 @@ show_menu() {
     echo "11) Lock SSH to Tailscale Only"
     echo "12) Open Web Ports (80/443)"
     echo "13) Hygiene (fail2ban + unattended-upgrades)"
-    echo "14) Exit"
+    echo "14) Lynis Audit"
+    echo "15) Change SSH Port (random)"
+    echo "16) UFW Reset (SSH + 80/443/3000)"
+    echo "17) Unattended Upgrades (security only)"
+    echo "18) Kernel Hardening (sysctl)"
+    echo "19) fail2ban (SSH jail)"
+    echo "20) Exit"
     echo "=========================================="
     echo "Esc — exit | Esc in submenu — back to menu"
-    echo -n "Select an option [1-14]: "
+    echo -n "Select an option [1-20]: "
 }
 
 MENU_ESC=0
@@ -427,6 +433,162 @@ setup_hygiene() {
     systemctl enable fail2ban unattended-upgrades >/dev/null 2>&1
     systemctl restart fail2ban unattended-upgrades >/dev/null 2>&1
     echo -e "${GREEN}✓ fail2ban + unattended-upgrades installed and enabled${NC}"
+}
+
+lynis_audit() {
+    echo -e "\n${YELLOW}=== Lynis Audit ===${NC}"
+    if ! command -v lynis &> /dev/null; then
+        apt-get update -qq
+        apt-get install -y -qq lynis
+    fi
+    lynis audit system --quick 2>/dev/null | tail -50
+    echo -e "${GREEN}✓ Lynis audit complete — full report: /var/log/lynis-report.dat${NC}"
+}
+
+change_ssh_port() {
+    echo -e "\n${YELLOW}=== Change SSH Port ===${NC}"
+    local new_port
+    new_port=$(generate_random_port)
+
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%Y%m%d_%H%M%S)
+
+    sed -i '/^#*Port /d' /etc/ssh/sshd_config
+    echo "Port ${new_port}" >> /etc/ssh/sshd_config
+    sed -i 's/#*MaxAuthTries.*/MaxAuthTries 3/' /etc/ssh/sshd_config
+    sed -i 's/#*LoginGraceTime.*/LoginGraceTime 30/' /etc/ssh/sshd_config
+    sed -i 's/#*X11Forwarding yes/X11Forwarding no/' /etc/ssh/sshd_config
+    grep -q "^MaxAuthTries" /etc/ssh/sshd_config || echo "MaxAuthTries 3" >> /etc/ssh/sshd_config
+    grep -q "^LoginGraceTime" /etc/ssh/sshd_config || echo "LoginGraceTime 30" >> /etc/ssh/sshd_config
+
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw allow ${new_port}/tcp comment 'SSH' >/dev/null 2>&1
+    fi
+
+    if systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null; then
+        echo -e "${GREEN}✓ SSH port changed to ${new_port}${NC}"
+        echo -e "${RED}⚠ Test in a new terminal: ssh -p ${new_port} root@$(hostname -I | awk '{print $1}')${NC}"
+    else
+        echo -e "${RED}✗ Failed to restart SSH service${NC}"
+    fi
+}
+
+ufw_reset_full() {
+    echo -e "\n${YELLOW}=== UFW Reset (full) ===${NC}"
+    if ! command -v ufw &> /dev/null; then
+        apt-get install -y -qq ufw
+    fi
+
+    local ssh_port
+    ssh_port=$(grep "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+    ssh_port=${ssh_port:-22}
+
+    ufw --force reset >/dev/null
+    ufw default deny incoming >/dev/null
+    ufw default allow outgoing >/dev/null
+    ufw allow ${ssh_port}/tcp comment 'SSH' >/dev/null
+    ufw allow 80/tcp comment 'HTTP' >/dev/null
+    ufw allow 443/tcp comment 'HTTPS' >/dev/null
+    ufw allow 3000/tcp comment 'Dokploy' >/dev/null
+    ufw --force enable >/dev/null
+
+    echo -e "${GREEN}✓ UFW reset — allowed: ${ssh_port} (SSH), 80, 443, 3000${NC}"
+    ufw status numbered
+}
+
+setup_unattended_upgrades() {
+    echo -e "\n${YELLOW}=== Unattended Upgrades ===${NC}"
+    apt-get install -y -qq unattended-upgrades apt-listchanges
+
+    cat > /etc/apt/apt.conf.d/20auto-upgrades << 'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+
+    cat > /etc/apt/apt.conf.d/50unattended-upgrades << 'EOF'
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+};
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";
+EOF
+
+    systemctl enable unattended-upgrades >/dev/null 2>&1
+    systemctl start unattended-upgrades >/dev/null 2>&1
+    echo -e "${GREEN}✓ Unattended upgrades configured (security updates only)${NC}"
+}
+
+apply_kernel_hardening() {
+    echo -e "\n${YELLOW}=== Kernel Hardening ===${NC}"
+
+    cat > /etc/sysctl.d/99-security.conf << 'EOF'
+# IP Spoofing protection
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+
+# Ignore ICMP broadcast requests
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+
+# Disable source packet routing
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.default.accept_source_route = 0
+
+# Ignore send redirects
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+# Block SYN attacks
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_syn_backlog = 2048
+net.ipv4.tcp_synack_retries = 2
+net.ipv4.tcp_syn_retries = 5
+
+# Log Martians
+net.ipv4.conf.all.log_martians = 1
+
+# Ignore ICMP redirects
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+EOF
+
+    sysctl -p /etc/sysctl.d/99-security.conf >/dev/null 2>&1
+    echo -e "${GREEN}✓ Kernel security settings applied${NC}"
+}
+
+setup_fail2ban_ssh() {
+    echo -e "\n${YELLOW}=== fail2ban (SSH jail) ===${NC}"
+    apt-get install -y -qq fail2ban
+
+    local ssh_port
+    ssh_port=$(grep "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+    ssh_port=${ssh_port:-22}
+
+    cat > /etc/fail2ban/jail.local << EOF
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 5
+ignoreip = 127.0.0.1/8 ::1
+
+[sshd]
+enabled = true
+port = ${ssh_port}
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 24h
+EOF
+
+    systemctl enable fail2ban >/dev/null 2>&1
+    systemctl restart fail2ban >/dev/null 2>&1
+    echo -e "${GREEN}✓ fail2ban configured for SSH port ${ssh_port}${NC}"
 }
 
 configure_swap() {
@@ -990,6 +1152,30 @@ while true; do
             pause_before_menu
             ;;
         14)
+            lynis_audit
+            pause_before_menu
+            ;;
+        15)
+            change_ssh_port
+            pause_before_menu
+            ;;
+        16)
+            ufw_reset_full
+            pause_before_menu
+            ;;
+        17)
+            setup_unattended_upgrades
+            pause_before_menu
+            ;;
+        18)
+            apply_kernel_hardening
+            pause_before_menu
+            ;;
+        19)
+            setup_fail2ban_ssh
+            pause_before_menu
+            ;;
+        20)
             echo -e "\n${GREEN}Goodbye!${NC}"
             exit 0
             ;;
