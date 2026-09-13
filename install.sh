@@ -18,25 +18,29 @@ show_menu() {
     echo "=========================================="
     echo "       Ubuntu Server Setup Tool"
     echo "=========================================="
+    echo "--- General ---"
     echo "1) Setup SSH Key Authentication Only"
     echo "2) Configure Swap File"
     echo "3) Setup VPN Connection"
     echo "4) Install Docker & Docker Compose"
     echo "5) Install Dokploy"
-    echo "6) Security Hardening"
+    echo "6) Security Hardening (legacy, public SSH)"
     echo "7) Install & Configure Squid Proxy"
+    echo "14) Lynis Audit"
+    echo "15) Change SSH Port (random)"
+    echo "16) UFW Reset (SSH + 80/443/3000, legacy public SSH)"
+    echo "17) Unattended Upgrades (security only)"
+    echo "18) Kernel Hardening (sysctl)"
+    echo "19) fail2ban (SSH jail)"
+    echo ""
+    echo "--- Tailscale Node Setup (recommended) ---"
     echo "8) SSH Root Lockdown (key-only, drop-in)"
     echo "9) UFW Setup (default-deny + allow SSH)"
     echo "10) Install Tailscale"
     echo "11) Lock SSH to Tailscale Only"
     echo "12) Open Web Ports (80/443)"
     echo "13) Hygiene (fail2ban + unattended-upgrades)"
-    echo "14) Lynis Audit"
-    echo "15) Change SSH Port (random)"
-    echo "16) UFW Reset (SSH + 80/443/3000)"
-    echo "17) Unattended Upgrades (security only)"
-    echo "18) Kernel Hardening (sysctl)"
-    echo "19) fail2ban (SSH jail)"
+    echo ""
     echo "20) Exit"
     echo "=========================================="
     echo "Esc — exit | Esc in submenu — back to menu"
@@ -447,8 +451,11 @@ lynis_audit() {
 
 change_ssh_port() {
     echo -e "\n${YELLOW}=== Change SSH Port ===${NC}"
-    local new_port custom_port
+    local new_port custom_port old_port
     new_port=$(generate_random_port)
+
+    old_port=$(grep '^Port ' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+    old_port=${old_port:-22}
 
     read_from_terminal -p "Enter SSH port (Enter for random $new_port): " custom_port || return
     if [[ -n "$custom_port" ]]; then
@@ -470,6 +477,9 @@ change_ssh_port() {
     grep -q "^LoginGraceTime" /etc/ssh/sshd_config || echo "LoginGraceTime 30" >> /etc/ssh/sshd_config
 
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+        if [[ "$old_port" != "$new_port" ]]; then
+            ufw --force delete allow ${old_port}/tcp >/dev/null 2>&1
+        fi
         ufw allow ${new_port}/tcp comment 'SSH' >/dev/null 2>&1
     fi
 
