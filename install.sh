@@ -447,8 +447,17 @@ lynis_audit() {
 
 change_ssh_port() {
     echo -e "\n${YELLOW}=== Change SSH Port ===${NC}"
-    local new_port
+    local new_port custom_port
     new_port=$(generate_random_port)
+
+    read_from_terminal -p "Enter SSH port (Enter for random $new_port): " custom_port || return
+    if [[ -n "$custom_port" ]]; then
+        if [[ "$custom_port" =~ ^[0-9]+$ ]] && [[ "$custom_port" -ge 1 ]] && [[ "$custom_port" -le 65535 ]]; then
+            new_port=$custom_port
+        else
+            echo -e "${RED}Invalid port, using random $new_port instead.${NC}"
+        fi
+    fi
 
     cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%Y%m%d_%H%M%S)
 
