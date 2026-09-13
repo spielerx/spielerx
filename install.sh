@@ -25,10 +25,16 @@ show_menu() {
     echo "5) Install Dokploy"
     echo "6) Security Hardening"
     echo "7) Install & Configure Squid Proxy"
-    echo "8) Exit"
+    echo "8) SSH Root Lockdown (key-only, drop-in)"
+    echo "9) UFW Setup (default-deny + allow SSH)"
+    echo "10) Install Tailscale"
+    echo "11) Lock SSH to Tailscale Only"
+    echo "12) Open Web Ports (80/443)"
+    echo "13) Hygiene (fail2ban + unattended-upgrades)"
+    echo "14) Exit"
     echo "=========================================="
     echo "Esc — exit | Esc in submenu — back to menu"
-    echo -n "Select an option [1-8]: "
+    echo -n "Select an option [1-14]: "
 }
 
 MENU_ESC=0
@@ -360,6 +366,67 @@ setup_ssh_key_auth() {
     
     echo -e "${GREEN}✓ SSH key authentication configured successfully!${NC}"
     echo -e "${YELLOW}⚠ IMPORTANT: Test SSH key login in another terminal before closing this session!${NC}"
+}
+
+ssh_root_lockdown() {
+    echo -e "\n${YELLOW}=== SSH Root Lockdown ===${NC}"
+    echo "Root login only by key, password auth off. Works whether you're on VNC or SSH."
+    echo ""
+
+    printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\n' > /etc/ssh/sshd_config.d/00-hardening.conf
+
+    if systemctl restart sshd 2>/dev/null; then
+        echo -e "${GREEN}✓ SSH service restarted (sshd)${NC}"
+    elif systemctl restart ssh 2>/dev/null; then
+        echo -e "${GREEN}✓ SSH service restarted (ssh)${NC}"
+    else
+        echo -e "${RED}✗ Failed to restart SSH service${NC}"
+        return
+    fi
+
+    echo -e "${GREEN}✓ Root login locked to key-only (/etc/ssh/sshd_config.d/00-hardening.conf)${NC}"
+    echo -e "${YELLOW}⚠ Test key login in another terminal before closing this session!${NC}"
+}
+
+ufw_default_deny() {
+    echo -e "\n${YELLOW}=== UFW Setup ===${NC}"
+    apt-get install -y ufw
+    ufw default deny incoming
+    ufw default allow outgoing
+    ufw allow OpenSSH
+    ufw --force enable
+    echo -e "${GREEN}✓ UFW enabled: default deny incoming, SSH allowed${NC}"
+}
+
+install_tailscale() {
+    echo -e "\n${YELLOW}=== Tailscale Install ===${NC}"
+    curl -fsSL https://tailscale.com/install.sh | sh
+    tailscale up
+    echo -e "${GREEN}✓ Tailscale installed and connected${NC}"
+}
+
+lock_ssh_to_tailscale() {
+    echo -e "\n${YELLOW}=== Lock SSH to Tailscale ===${NC}"
+    echo -e "${RED}⚠ Confirm Tailscale SSH access works before running this — it removes public SSH.${NC}"
+    ufw delete allow OpenSSH
+    ufw allow in on tailscale0 to any port 22
+    ufw reload
+    echo -e "${GREEN}✓ Public SSH removed, only reachable via Tailscale${NC}"
+}
+
+open_web_ports() {
+    echo -e "\n${YELLOW}=== Open Web Ports ===${NC}"
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+    echo -e "${GREEN}✓ 80/tcp and 443/tcp opened${NC}"
+}
+
+setup_hygiene() {
+    echo -e "\n${YELLOW}=== Hygiene ===${NC}"
+    apt-get install -y fail2ban unattended-upgrades
+    systemctl enable fail2ban unattended-upgrades >/dev/null 2>&1
+    systemctl restart fail2ban unattended-upgrades >/dev/null 2>&1
+    echo -e "${GREEN}✓ fail2ban + unattended-upgrades installed and enabled${NC}"
 }
 
 configure_swap() {
@@ -899,6 +966,30 @@ while true; do
             pause_before_menu
             ;;
         8)
+            ssh_root_lockdown
+            pause_before_menu
+            ;;
+        9)
+            ufw_default_deny
+            pause_before_menu
+            ;;
+        10)
+            install_tailscale
+            pause_before_menu
+            ;;
+        11)
+            lock_ssh_to_tailscale
+            pause_before_menu
+            ;;
+        12)
+            open_web_ports
+            pause_before_menu
+            ;;
+        13)
+            setup_hygiene
+            pause_before_menu
+            ;;
+        14)
             echo -e "\n${GREEN}Goodbye!${NC}"
             exit 0
             ;;
