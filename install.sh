@@ -383,12 +383,12 @@ ssh_root_lockdown() {
     echo "Root login only by key, password auth off. Works whether you're on VNC or SSH."
     echo ""
 
-    printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\n' > /etc/ssh/sshd_config.d/00-hardening.conf
+    printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\nUsePAM no\n' > /etc/ssh/sshd_config.d/00-hardening.conf
 
-    if systemctl restart sshd 2>/dev/null; then
-        echo -e "${GREEN}✓ SSH service restarted (sshd)${NC}"
-    elif systemctl restart ssh 2>/dev/null; then
+    if systemctl restart ssh 2>/dev/null; then
         echo -e "${GREEN}✓ SSH service restarted (ssh)${NC}"
+    elif systemctl restart sshd 2>/dev/null; then
+        echo -e "${GREEN}✓ SSH service restarted (sshd)${NC}"
     else
         echo -e "${RED}✗ Failed to restart SSH service${NC}"
         return
@@ -434,9 +434,26 @@ open_web_ports() {
 setup_hygiene() {
     echo -e "\n${YELLOW}=== Hygiene ===${NC}"
     apt-get install -y fail2ban unattended-upgrades
+
+    cat > /etc/fail2ban/jail.local << 'EOF'
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 5
+ignoreip = 127.0.0.1/8 ::1
+
+[sshd]
+enabled = true
+mode = aggressive
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 24h
+EOF
+
     systemctl enable fail2ban unattended-upgrades >/dev/null 2>&1
     systemctl restart fail2ban unattended-upgrades >/dev/null 2>&1
-    echo -e "${GREEN}✓ fail2ban + unattended-upgrades installed and enabled${NC}"
+    echo -e "${GREEN}✓ fail2ban (SSH jail, aggressive) + unattended-upgrades installed and enabled${NC}"
 }
 
 lynis_audit() {
